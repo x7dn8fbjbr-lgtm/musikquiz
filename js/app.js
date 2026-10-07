@@ -1,5 +1,5 @@
 import { store, save, pool, addSource, removeSource, removeSong, recordAnswer, recordRound, resetStats, exportData, importData } from './storage.js';
-import { searchSongs } from './api.js';
+import { searchSongs, diagnose } from './api.js';
 import { MODES, buildRound, evaluate, weakItems } from './questions.js';
 
 const view = document.getElementById('view');
@@ -547,6 +547,8 @@ function renderSettings() {
     <div class="card stack">
       <label class="field"><span>iTunes-Store-Land</span><select data-set="country">${opt(['DE', 'AT', 'CH', 'US', 'GB'], s.country)}</select></label>
       <label class="row"><input type="checkbox" data-set="originalsOnly" ${s.originalsOnly ? 'checked' : ''} style="width:20px;height:20px"> <span>Live-, Karaoke-, Remix- und Cover-Versionen ausblenden</span></label>
+      <button class="btn btn-block" id="diagnose">🔌 Verbindung testen</button>
+      <ul class="list small" id="diag-out"></ul>
       <p class="muted small">Hinweis: Das Erscheinungsjahr stammt aus dem iTunes-Katalog. Bei Neuauflagen kann es vom Original abweichen – die App nimmt deshalb immer das früheste gefundene Jahr.</p>
     </div>
     <h2>App & Daten</h2>
@@ -565,6 +567,14 @@ function renderSettings() {
     toast('Gespeichert');
   }));
   view.querySelector('#install')?.addEventListener('click', install);
+  view.querySelector('#diagnose').onclick = async e => {
+    const btn = e.currentTarget, list = view.querySelector('#diag-out');
+    btn.disabled = true;
+    list.innerHTML = '<li><span class="spinner"></span> Teste …</li>';
+    const rows = await diagnose();
+    list.innerHTML = rows.map(r => `<li><span class="mark ${r.ok ? 'ok' : 'bad'}">${r.ok ? '✓' : '✗'}</span><div class="grow"><strong>${esc(r.name)}</strong><div class="muted" style="overflow-wrap:anywhere">${esc(r.detail)}</div></div></li>`).join('');
+    btn.disabled = false;
+  };
   view.querySelector('#export').onclick = () => {
     const url = URL.createObjectURL(new Blob([exportData()], { type: 'application/json' }));
     const a = Object.assign(document.createElement('a'), { href: url, download: `musikquiz-sicherung-${new Date().toISOString().slice(0, 10)}.json` });

@@ -1,4 +1,5 @@
-// Songsuche über die öffentliche iTunes Search API: erst direkt per fetch, dann per JSONP.
+// Songsuche über die öffentliche iTunes Search API: erst über den eigenen Vermittler
+// (api/itunes.js, nur bei Vercel-Hosting vorhanden), dann direkt per fetch, dann per JSONP.
 const ENDPOINT = 'https://itunes.apple.com/search';
 
 const VARIANT_RE = /\b(live|karaoke|instrumental|remix|re-?mix|tribute|cover|made famous|medley|acapella|a cappella|demo|workout|lullaby|piano version|8-bit)\b/i;
@@ -47,7 +48,16 @@ async function viaFetch(url, timeoutMs = 12000) {
   }
 }
 
+// Vermittler auf demselben Server; fehlt er (z. B. GitHub Pages), gibt es 404.
+function viaProxy(url) {
+  if (location.hostname.endsWith('.github.io')) return Promise.reject(new Error('nicht vorhanden (nur bei Vercel-Hosting)'));
+  return viaFetch('api/itunes' + url.slice(ENDPOINT.length)).catch(e => {
+    throw new Error(/HTTP 404/.test(e.message) ? 'nicht vorhanden (nur bei Vercel-Hosting)' : e.message);
+  });
+}
+
 const METHODS = [
+  ['Vermittler (eigener Server)', viaProxy],
   ['Direkt (fetch)', viaFetch],
   ['JSONP', jsonp],
 ];
@@ -139,4 +149,9 @@ export async function searchSongs(term, { attr = 'all', limit = 100, country = '
     if (!prev || song.y < prev.y) byKey.set(key, song);
   }
   return [...byKey.values()];
+}
+
+// Ausweich-Adresse für Hörproben, die das Gerät nicht direkt laden kann.
+export function proxiedPreview(url) {
+  return 'api/preview?u=' + encodeURIComponent(url);
 }

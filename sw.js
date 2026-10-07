@@ -1,5 +1,5 @@
 // App-Shell offline verfügbar machen. Songsuche und Hörproben brauchen weiterhin Internet.
-const CACHE = 'musikquiz-v2';
+const CACHE = 'musikquiz-v3';
 const SHELL = [
   './',
   'index.html',
@@ -29,7 +29,7 @@ self.addEventListener('activate', e => {
 // Network-first für eigene Dateien (Updates kommen sofort an), Cache als Offline-Fallback.
 self.addEventListener('fetch', e => {
   const url = new URL(e.request.url);
-  if (e.request.method !== 'GET' || url.origin !== location.origin) return;
+  if (e.request.method !== 'GET' || url.origin !== location.origin || url.pathname.includes('/api/')) return;
   e.respondWith(
     fetch(e.request)
       .then(res => {

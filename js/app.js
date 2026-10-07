@@ -1,5 +1,5 @@
 import { store, save, pool, addSource, removeSource, removeSong, recordAnswer, recordRound, resetStats, exportData, importData } from './storage.js';
-import { searchSongs, diagnose } from './api.js';
+import { searchSongs, diagnose, proxiedPreview } from './api.js';
 import { MODES, buildRound, evaluate, weakItems } from './questions.js';
 
 const view = document.getElementById('view');
@@ -37,7 +37,27 @@ function render() {
   ({ home: renderHome, songs: renderSongs, stats: renderStats, settings: renderSettings })[currentTab]();
 }
 
+// Lädt die Hörprobe; schlägt das fehl, einmal über den Vermittler versuchen.
+function loadPreview(song) {
+  audio.src = song.p;
+  audio.dataset.song = song.id;
+  audio.addEventListener('error', function retry() {
+    if (audio.dataset.song !== song.id || audio.src !== song.p) return;
+    const wasPlaying = audio.dataset.wantPlay === '1';
+    audio.src = proxiedPreview(song.p);
+    if (wasPlaying) audio.play().catch(() => {});
+  }, { once: true });
+}
+
+function playAudio() {
+  audio.dataset.wantPlay = '1';
+  return audio.play();
+}
+
+audio.addEventListener('pause', () => (audio.dataset.wantPlay = ''));
+
 function stopAudio() {
+  audio.dataset.song = '';
   audio.pause();
   audio.removeAttribute('src');
   audio.load();
@@ -106,7 +126,7 @@ function showQuestion() {
 
 function playSong(song, withTimer) {
   stopAudio();
-  audio.src = song.p;
+  loadPreview(song);
   const run = quiz, idx = quiz?.i;
   const begin = () => {
     if (withTimer && quiz && quiz === run && quiz.i === idx && !quiz.answered && !quiz.timer) startTimer();
@@ -115,7 +135,7 @@ function playSong(song, withTimer) {
   // Falls die Vorschau hängt, startet der Countdown trotzdem nach 5 s.
   if (withTimer) setTimeout(begin, 5000);
   // Blockiert der Browser Autoplay, startet der Play-Button die Hörprobe.
-  audio.play().catch(() => {});
+  playAudio().catch(() => {});
 }
 
 function startTimer() {
@@ -160,7 +180,7 @@ function submitAnswer(answer) {
   save();
   renderQuiz();
   // Nach der Antwort läuft die Hörprobe zum Nachhören weiter.
-  if (q.audio && audio.paused && audio.src) audio.play().catch(() => {});
+  if (q.audio && audio.paused && audio.src) playAudio().catch(() => {});
 }
 
 function nextQuestion() {
@@ -277,7 +297,7 @@ function wireQuiz(q, last) {
   view.querySelector('#next')?.focus();
   view.querySelector('#play')?.addEventListener('click', () => {
     if (!audio.src) playSong(q.song, !last);
-    else if (audio.paused) audio.play().catch(() => toast('Wiedergabe nicht möglich'));
+    else if (audio.paused) playAudio().catch(() => toast('Wiedergabe nicht möglich'));
     else audio.pause();
   });
   if (last) return;
@@ -434,11 +454,11 @@ function renderSongs() {
 function togglePreview(btn) {
   const song = store.songs[btn.dataset.preview];
   if (!song) return;
-  const isThis = audio.src === song.p && !audio.paused;
+  const isThis = audio.dataset.song === song.id && !audio.paused;
   view.querySelectorAll('[data-preview]').forEach(b => (b.textContent = '▶'));
   if (isThis) return audio.pause();
-  audio.src = song.p;
-  audio.play().then(() => (btn.textContent = '❚❚')).catch(() => toast('Wiedergabe nicht möglich'));
+  loadPreview(song);
+  playAudio().then(() => (btn.textContent = '❚❚')).catch(() => {});
 }
 
 async function doSearch(term, attr, limit) {

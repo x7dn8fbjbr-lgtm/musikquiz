@@ -15,22 +15,24 @@ Installierbare Web-App (PWA), mit der du für Musikquiz-Abende trainierst – au
 
 Alle Daten bleiben lokal im Browser (localStorage).
 
-## Starten
+## Hosting (empfohlen: Vercel)
 
-Die App besteht nur aus statischen Dateien. Lokal reicht ein einfacher Webserver:
+Manche iPhones erreichen die iTunes-Suche aus Safari nicht direkt. Deshalb bringt die App einen
+kleinen Vermittler mit (`api/itunes.js` für die Suche, `api/preview.js` für Hörproben), der als
+Vercel-Funktion läuft. Die App nutzt ihn automatisch und fällt sonst auf die direkte Abfrage zurück.
 
-```bash
-python3 -m http.server 8000
-# dann http://localhost:8000 öffnen
-```
+Einmalig einrichten:
+1. Auf [vercel.com](https://vercel.com) mit dem GitHub-Konto anmelden (Hobby-Tarif, kostenlos).
+2. **Add New → Project** und dieses Repository importieren. Framework: „Other“, keine weiteren Einstellungen.
+3. **Deploy** – danach wird jede Änderung auf `main` automatisch veröffentlicht.
 
-### Veröffentlichen & installieren
+Die App ist dann unter `https://<projektname>.vercel.app` erreichbar. Auf dem Handy öffnen und
+„Zum Home-Bildschirm“ wählen (iPhone: Safari → Teilen → Zum Home-Bildschirm).
 
-Der Workflow `.github/workflows/pages.yml` veröffentlicht die App bei jedem Push auf `main` über GitHub Pages.
-Einmalig unter **Settings → Pages → Build and deployment → Source** „GitHub Actions“ auswählen.
+GitHub Pages (`.github/workflows/pages.yml`) funktioniert weiterhin, aber ohne Vermittler.
 
-Danach die Pages-Adresse auf dem Handy öffnen und „Zum Startbildschirm hinzufügen“ bzw. „App installieren“ wählen
-(iPhone: Safari → Teilen → Zum Home-Bildschirm).
+Lokal reicht für die Oberfläche ein einfacher Webserver (`python3 -m http.server 8000`); der
+Vermittler läuft lokal mit `npx vercel dev`.
 
 ## Hinweise
 

@@ -10,6 +10,7 @@ Installierbare Web-App (PWA), mit der du für Musikquiz-Abende trainierst – au
 - **🔁 Schwächen trainieren** – Lernkarten-Prinzip (Leitner-Boxen): falsch beantwortete Songs kommen öfter dran, bis sie sitzen.
 - **⏱ Countdown** – frei einstellbar; schnelle Antworten bringen mehr Punkte.
 - **📊 Statistik** – Trefferquote, Verlauf, Bestwerte pro Modus, Problem-Songs zum Nachhören.
+- **Jahrzehnte** – beim Hinzufügen nur Songs aus z. B. den 90ern übernehmen und im Training auf ein Jahrzehnt einschränken (60er bis 2020er).
 - **Frei wählbarer Song-Pool** – über die iTunes-Suche nach Interpreten, Titeln oder Stichworten (z. B. „Queen“, „Schlager“, „80s Hits“).
 - Sicherung exportieren/importieren, Hell-/Dunkelmodus, Tastatursteuerung (1–4, Enter, Leertaste).
 

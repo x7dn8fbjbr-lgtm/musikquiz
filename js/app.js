@@ -1,6 +1,6 @@
 import { store, save, pool, addSource, removeSource, removeSong, recordAnswer, recordRound, resetStats, exportData, importData } from './storage.js';
 import { searchSongs, diagnose, proxiedPreview } from './api.js';
-import { MODES, buildRound, evaluate, weakItems } from './questions.js';
+import { MODES, DECADES, decadeLabel, inDecade, buildRound, evaluate, weakItems } from './questions.js';
 
 const view = document.getElementById('view');
 const tabbar = document.getElementById('tabbar');
@@ -69,11 +69,27 @@ tabbar.addEventListener('click', e => {
 });
 
 // ---------- Training (Start) ----------
+// Song-Pool fürs Training, eingeschränkt auf das gewählte Jahrzehnt.
+function trainingPool() {
+  return pool().filter(song => inDecade(song, store.settings.decade));
+}
+
+function decadeChips() {
+  const all = pool();
+  const counts = Object.fromEntries(DECADES.map(d => [d, all.filter(song => inDecade(song, d)).length]));
+  const cur = store.settings.decade;
+  const chip = (d, n) => `<button class="chip${d === cur ? ' active' : ''}" data-decade="${d}" aria-pressed="${d === cur}">${decadeLabel(d)} <span class="muted small">${n}</span></button>`;
+  return `<div class="chips" role="group" aria-label="Jahrzehnt">
+    ${chip('', all.length)}
+    ${DECADES.filter(d => counts[d] || d === cur).map(d => chip(d, counts[d])).join('')}
+  </div>`;
+}
+
 function renderHome() {
-  const songs = pool();
+  const songs = trainingPool();
   const weakCount = weakItems(songs).length;
   const s = store.settings;
-  if (songs.length < 4) {
+  if (pool().length < 4) {
     view.innerHTML = `
       <div class="card hero stack">
         <h1>Willkommen!</h1>
@@ -85,10 +101,13 @@ function renderHome() {
   }
   view.innerHTML = `
     <h1>Training</h1>
-    <p class="muted small">${songs.length} Songs im Pool · ${s.count} Fragen pro Runde · ${s.timer ? `${s.timer} s Countdown` : 'ohne Countdown'}</p>
+    <p class="muted small">${songs.length} Songs${s.decade ? ` aus den ${decadeLabel(s.decade)}n` : ' im Pool'} · ${s.count} Fragen pro Runde · ${s.timer ? `${s.timer} s Countdown` : 'ohne Countdown'}</p>
+    <h2 style="margin-top:16px">Jahrzehnt</h2>
+    ${decadeChips()}
+    ${songs.length < 4 ? `<p class="muted small" style="margin-top:8px">Für die ${decadeLabel(s.decade)} sind zu wenige Songs im Pool. Füge unter „Songs“ welche hinzu (mit Jahrzehnt ${decadeLabel(s.decade)}).</p>` : ''}
     <div class="modes" style="margin-top:16px">
       ${Object.entries(MODES).map(([key, m]) => `
-        <button class="mode" data-mode="${key}" ${key === 'weak' && !weakCount ? 'disabled' : ''}>
+        <button class="mode" data-mode="${key}" ${(key === 'weak' && !weakCount) || songs.length < 4 ? 'disabled' : ''}>
           <span class="icon" aria-hidden="true">${m.icon}</span>
           <strong>${m.name}</strong>
           <span class="muted">${m.desc}</span>
@@ -97,12 +116,17 @@ function renderHome() {
     </div>
     ${deferredInstall ? '<button class="btn btn-block" id="install" style="margin-top:16px">📲 App installieren</button>' : ''}`;
   view.querySelectorAll('[data-mode]').forEach(b => (b.onclick = () => startQuiz(b.dataset.mode)));
+  view.querySelectorAll('[data-decade]').forEach(b => (b.onclick = () => {
+    store.settings.decade = b.dataset.decade;
+    save();
+    renderHome();
+  }));
   view.querySelector('#install')?.addEventListener('click', install);
 }
 
 // ---------- Quiz ----------
 function startQuiz(mode) {
-  const questions = buildRound(mode, pool(), store.settings.count);
+  const questions = buildRound(mode, trainingPool(), store.settings.count);
   if (!questions.length) {
     toast('Zu wenige passende Songs – füge mehr hinzu.');
     return;
@@ -363,7 +387,7 @@ function renderResult(done) {
     </div>
     <div class="row" style="margin-top:12px">
       <button class="btn btn-primary grow" id="again">Nochmal</button>
-      <button class="btn grow" id="weak" ${weakItems(pool()).length ? '' : 'disabled'}>Schwächen üben</button>
+      <button class="btn grow" id="weak" ${weakItems(trainingPool()).length ? '' : 'disabled'}>Schwächen üben</button>
       <button class="btn grow" id="home">Übersicht</button>
     </div>
     <h2>Deine Antworten</h2>
@@ -402,6 +426,9 @@ function renderSongs() {
         <label class="field grow"><span>Suchen in</span>
           <select name="attr"><option value="artist">Interpret</option><option value="all">Alles (Titel, Album, Genre …)</option><option value="song">Songtitel</option></select>
         </label>
+        <label class="field grow"><span>Jahrzehnt</span>
+          <select name="decade">${['', ...DECADES].map(d => `<option value="${d}" ${d === store.settings.searchDecade ? 'selected' : ''}>${d ? decadeLabel(d) : 'Alle Jahrzehnte'}</option>`).join('')}</select>
+        </label>
         <label class="field grow"><span>Max. Treffer</span>
           <select name="limit">${[25, 50, 100, 200].map(n => `<option ${n === store.settings.limit ? 'selected' : ''}>${n}</option>`).join('')}</select>
         </label>
@@ -433,9 +460,9 @@ function renderSongs() {
   const form = view.querySelector('#search-form');
   form.onsubmit = e => {
     e.preventDefault();
-    doSearch(form.term.value.trim(), form.attr.value, +form.limit.value);
+    doSearch(form.term.value.trim(), form.attr.value, +form.limit.value, form.decade.value);
   };
-  view.querySelectorAll('[data-term]').forEach(b => (b.onclick = () => doSearch(b.dataset.term, b.dataset.attr, +form.limit.value)));
+  view.querySelectorAll('[data-term]').forEach(b => (b.onclick = () => doSearch(b.dataset.term, b.dataset.attr, +form.limit.value, form.decade.value)));
   view.querySelectorAll('[data-del-src]').forEach(b => (b.onclick = () => {
     removeSource(b.dataset.delSrc);
     renderSongs();
@@ -461,20 +488,25 @@ function togglePreview(btn) {
   playAudio().then(() => (btn.textContent = '❚❚')).catch(() => {});
 }
 
-async function doSearch(term, attr, limit) {
+async function doSearch(term, attr, limit, decade = '') {
   if (!term) return;
   const btn = view.querySelector('#search-btn');
   btn.disabled = true;
   btn.innerHTML = `<span class="spinner"></span> Suche „${esc(term)}“ …`;
   store.settings.limit = limit;
+  store.settings.searchDecade = decade;
+  save();
   try {
     const { country, originalsOnly } = store.settings;
-    const songs = await searchSongs(term, { attr, limit, country, originalsOnly });
+    // Mit Jahrzehnt-Filter so viele Treffer wie möglich holen, danach filtern.
+    const found = await searchSongs(term, { attr, limit: decade ? 200 : limit, country, originalsOnly });
+    const songs = found.filter(song => inDecade(song, decade)).slice(0, limit);
+    const where = decade ? ` aus den ${decadeLabel(decade)}n` : '';
     if (!songs.length) {
-      toast(`Keine Songs mit Hörprobe für „${term}“ gefunden.`);
+      toast(`Keine Songs${where} mit Hörprobe für „${term}“ gefunden.`);
     } else {
-      const added = addSource(term, attr, songs);
-      toast(`${added} neue Songs hinzugefügt (${songs.length} gefunden).`);
+      const added = addSource(decade ? `${term} · ${decadeLabel(decade)}` : term, attr, songs);
+      toast(`${added} neue Songs${where} hinzugefügt (${songs.length} gefunden).`);
     }
   } catch (err) {
     toast(err.message);

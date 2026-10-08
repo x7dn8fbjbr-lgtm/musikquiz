@@ -13,6 +13,8 @@ const DEFAULTS = {
     originalsOnly: true,
     country: 'DE',
     limit: 100,
+    decade: '',       // Jahrzehnt-Filter fürs Training ('' = alle, sonst z. B. '1990')
+    searchDecade: '', // Jahrzehnt-Filter beim Hinzufügen
   },
 };
 

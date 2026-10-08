@@ -1,5 +1,5 @@
 // App-Shell offline verfügbar machen. Songsuche und Hörproben brauchen weiterhin Internet.
-const CACHE = 'musikquiz-v3';
+const CACHE = 'musikquiz-v4';
 const SHELL = [
   './',
   'index.html',

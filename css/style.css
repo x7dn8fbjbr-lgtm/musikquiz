@@ -253,3 +253,6 @@ details summary { cursor: pointer; padding: 6px 0; color: var(--accent); font-we
 }
 @keyframes spin { to { transform: rotate(360deg); } }
 .steps { display: grid; grid-template-columns: repeat(4, 1fr); gap: 8px; }
+.chip.active { background: var(--accent); border-color: var(--accent); color: #fff; font-weight: 600; }
+.chip.active .muted { color: inherit; opacity: .85; }
+@media (prefers-color-scheme: dark) { .chip.active { color: #150b2e; } }

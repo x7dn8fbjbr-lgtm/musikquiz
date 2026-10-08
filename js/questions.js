@@ -9,6 +9,17 @@ export const MODES = {
   weak: { name: 'Schwächen trainieren', icon: '🔁', desc: 'Nur Songs, die du zuletzt falsch hattest.' },
 };
 
+export const DECADES = ['1950', '1960', '1970', '1980', '1990', '2000', '2010', '2020'];
+
+export function decadeLabel(d) {
+  if (!d) return 'Alle';
+  return +d < 2000 ? `${d.slice(2)}er` : `${d}er`;
+}
+
+export function inDecade(song, d) {
+  return !d || (song.y >= +d && song.y < +d + 10);
+}
+
 const BOX_WEIGHT = [8, 5, 3, 2, 1, 1];
 const UNSEEN_WEIGHT = 4;
 
@@ -92,7 +103,8 @@ const KNOWLEDGE_KINDS = {
     return { prompt: `Wer singt bzw. spielt „${song.t}“?`, options: mcOptions(song.a, wrong) };
   },
   album(song, pool) {
-    if (!song.al || normalize(song.al).includes(normalize(song.t))) return null;
+    // Paket-Songs stammen oft von Compilations – das Album wäre dann irreführend.
+    if (song.pack || !song.al || normalize(song.al).includes(normalize(song.t))) return null;
     const isAlbum = a => a && !normalize(a).includes('greatest hits');
     const sameArtist = pool.filter(s => s.a === song.a).map(s => s.al).filter(isAlbum);
     let wrong = distinct(sameArtist, 3, normalize, [song.al]);

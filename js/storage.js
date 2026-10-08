@@ -6,6 +6,7 @@ const DEFAULTS = {
   sources: [],   // { id, term, attr, songIds: [] }
   items: {},     // `${mode}:${songId}` -> { c, w, box, last }
   rounds: [],    // { ts, mode, score, correct, total }
+  packMisses: {}, // Themenpaket-ID -> Schlüssel der Titel, die bei iTunes nicht gefunden wurden
   settings: {
     count: 10,
     timer: 20,
@@ -13,6 +14,8 @@ const DEFAULTS = {
     originalsOnly: true,
     country: 'DE',
     limit: 100,
+    decade: '',       // Jahrzehnt-Filter fürs Training ('' = alle, sonst z. B. '1990')
+    searchDecade: '', // Jahrzehnt-Filter beim Hinzufügen
   },
 };
 
@@ -47,9 +50,9 @@ export function pool() {
   return Object.values(store.songs);
 }
 
-export function addSource(term, attr, songs) {
+export function addSource(term, attr, songs, extra = {}) {
   const existing = store.sources.find(s => s.term.toLowerCase() === term.toLowerCase() && s.attr === attr);
-  const src = existing || { id: Date.now().toString(36), term, attr, songIds: [] };
+  const src = existing || { id: Date.now().toString(36), term, attr, songIds: [], ...extra };
   let added = 0;
   for (const song of songs) {
     if (!store.songs[song.id]) added++;
@@ -67,6 +70,12 @@ export function removeSource(id) {
   store.sources = store.sources.filter(s => s !== src);
   const stillUsed = new Set(store.sources.flatMap(s => s.songIds));
   for (const sid of src.songIds) if (!stillUsed.has(sid)) delete store.songs[sid];
+  if (src.packId) delete store.packMisses[src.packId];
+  save();
+}
+
+export function setPackMisses(packId, keys) {
+  store.packMisses[packId] = keys;
   save();
 }
 

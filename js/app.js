@@ -1,6 +1,7 @@
-import { store, save, pool, addSource, removeSource, removeSong, recordAnswer, recordRound, resetStats, exportData, importData } from './storage.js';
+import { store, save, pool, addSource, removeSource, setPackMisses, removeSong, recordAnswer, recordRound, resetStats, exportData, importData } from './storage.js';
 import { searchSongs, diagnose, proxiedPreview } from './api.js';
-import { MODES, buildRound, evaluate, weakItems } from './questions.js';
+import { PACKS, packKey, lookupPackSong } from './packs.js';
+import { MODES, DECADES, decadeLabel, inDecade, buildRound, evaluate, weakItems } from './questions.js';
 
 const view = document.getElementById('view');
 const tabbar = document.getElementById('tabbar');
@@ -69,11 +70,27 @@ tabbar.addEventListener('click', e => {
 });
 
 // ---------- Training (Start) ----------
+// Song-Pool fürs Training, eingeschränkt auf das gewählte Jahrzehnt.
+function trainingPool() {
+  return pool().filter(song => inDecade(song, store.settings.decade));
+}
+
+function decadeChips() {
+  const all = pool();
+  const counts = Object.fromEntries(DECADES.map(d => [d, all.filter(song => inDecade(song, d)).length]));
+  const cur = store.settings.decade;
+  const chip = (d, n) => `<button class="chip${d === cur ? ' active' : ''}" data-decade="${d}" aria-pressed="${d === cur}">${decadeLabel(d)} <span class="muted small">${n}</span></button>`;
+  return `<div class="chips" role="group" aria-label="Jahrzehnt">
+    ${chip('', all.length)}
+    ${DECADES.filter(d => counts[d] || d === cur).map(d => chip(d, counts[d])).join('')}
+  </div>`;
+}
+
 function renderHome() {
-  const songs = pool();
+  const songs = trainingPool();
   const weakCount = weakItems(songs).length;
   const s = store.settings;
-  if (songs.length < 4) {
+  if (pool().length < 4) {
     view.innerHTML = `
       <div class="card hero stack">
         <h1>Willkommen!</h1>
@@ -85,10 +102,13 @@ function renderHome() {
   }
   view.innerHTML = `
     <h1>Training</h1>
-    <p class="muted small">${songs.length} Songs im Pool · ${s.count} Fragen pro Runde · ${s.timer ? `${s.timer} s Countdown` : 'ohne Countdown'}</p>
+    <p class="muted small">${songs.length} Songs${s.decade ? ` aus den ${decadeLabel(s.decade)}n` : ' im Pool'} · ${s.count} Fragen pro Runde · ${s.timer ? `${s.timer} s Countdown` : 'ohne Countdown'}</p>
+    <h2 style="margin-top:16px">Jahrzehnt</h2>
+    ${decadeChips()}
+    ${songs.length < 4 ? `<p class="muted small" style="margin-top:8px">Für die ${decadeLabel(s.decade)} sind zu wenige Songs im Pool. Füge unter „Songs“ welche hinzu (mit Jahrzehnt ${decadeLabel(s.decade)}).</p>` : ''}
     <div class="modes" style="margin-top:16px">
       ${Object.entries(MODES).map(([key, m]) => `
-        <button class="mode" data-mode="${key}" ${key === 'weak' && !weakCount ? 'disabled' : ''}>
+        <button class="mode" data-mode="${key}" ${(key === 'weak' && !weakCount) || songs.length < 4 ? 'disabled' : ''}>
           <span class="icon" aria-hidden="true">${m.icon}</span>
           <strong>${m.name}</strong>
           <span class="muted">${m.desc}</span>
@@ -97,12 +117,17 @@ function renderHome() {
     </div>
     ${deferredInstall ? '<button class="btn btn-block" id="install" style="margin-top:16px">📲 App installieren</button>' : ''}`;
   view.querySelectorAll('[data-mode]').forEach(b => (b.onclick = () => startQuiz(b.dataset.mode)));
+  view.querySelectorAll('[data-decade]').forEach(b => (b.onclick = () => {
+    store.settings.decade = b.dataset.decade;
+    save();
+    renderHome();
+  }));
   view.querySelector('#install')?.addEventListener('click', install);
 }
 
 // ---------- Quiz ----------
 function startQuiz(mode) {
-  const questions = buildRound(mode, pool(), store.settings.count);
+  const questions = buildRound(mode, trainingPool(), store.settings.count);
   if (!questions.length) {
     toast('Zu wenige passende Songs – füge mehr hinzu.');
     return;
@@ -363,7 +388,7 @@ function renderResult(done) {
     </div>
     <div class="row" style="margin-top:12px">
       <button class="btn btn-primary grow" id="again">Nochmal</button>
-      <button class="btn grow" id="weak" ${weakItems(pool()).length ? '' : 'disabled'}>Schwächen üben</button>
+      <button class="btn grow" id="weak" ${weakItems(trainingPool()).length ? '' : 'disabled'}>Schwächen üben</button>
       <button class="btn grow" id="home">Übersicht</button>
     </div>
     <h2>Deine Antworten</h2>
@@ -392,15 +417,21 @@ const SUGGESTIONS = [
 
 function renderSongs() {
   const songs = pool().sort((a, b) => a.a.localeCompare(b.a) || a.t.localeCompare(b.t));
-  const attrLabel = { artist: 'Interpret', song: 'Songtitel', all: 'Alles' };
+  const attrLabel = { artist: 'Interpret', song: 'Songtitel', all: 'Alles', pack: 'Themenpaket' };
   view.innerHTML = `
     <h1>Songs</h1>
+    <h2>Themenpakete</h2>
+    <div class="stack" id="packs">${PACKS.map(packCard).join('')}</div>
+    <h2>Eigene Suche</h2>
     <p class="muted small">Such nach Interpreten, Genres oder Stichworten. Die Treffer (mit 30-Sekunden-Hörprobe) landen in deinem Song-Pool.</p>
-    <form class="card stack" id="search-form" style="margin-top:12px">
+    <form class="card stack" id="search-form">
       <label class="field"><span>Suchbegriff</span><input type="search" name="term" placeholder="z. B. Queen, Schlager, 80s Hits …" required enterkeyhint="search"></label>
       <div class="row">
         <label class="field grow"><span>Suchen in</span>
           <select name="attr"><option value="artist">Interpret</option><option value="all">Alles (Titel, Album, Genre …)</option><option value="song">Songtitel</option></select>
+        </label>
+        <label class="field grow"><span>Jahrzehnt</span>
+          <select name="decade">${['', ...DECADES].map(d => `<option value="${d}" ${d === store.settings.searchDecade ? 'selected' : ''}>${d ? decadeLabel(d) : 'Alle Jahrzehnte'}</option>`).join('')}</select>
         </label>
         <label class="field grow"><span>Max. Treffer</span>
           <select name="limit">${[25, 50, 100, 200].map(n => `<option ${n === store.settings.limit ? 'selected' : ''}>${n}</option>`).join('')}</select>
@@ -433,9 +464,10 @@ function renderSongs() {
   const form = view.querySelector('#search-form');
   form.onsubmit = e => {
     e.preventDefault();
-    doSearch(form.term.value.trim(), form.attr.value, +form.limit.value);
+    doSearch(form.term.value.trim(), form.attr.value, +form.limit.value, form.decade.value);
   };
-  view.querySelectorAll('[data-term]').forEach(b => (b.onclick = () => doSearch(b.dataset.term, b.dataset.attr, +form.limit.value)));
+  view.querySelectorAll('[data-term]').forEach(b => (b.onclick = () => doSearch(b.dataset.term, b.dataset.attr, +form.limit.value, form.decade.value)));
+  wirePacks();
   view.querySelectorAll('[data-del-src]').forEach(b => (b.onclick = () => {
     removeSource(b.dataset.delSrc);
     renderSongs();
@@ -451,6 +483,129 @@ function renderSongs() {
   });
 }
 
+// ---------- Themenpakete ----------
+let packLoad = null; // { id, done, total, found, stop }
+
+function packStatus(pack) {
+  const loaded = new Set(pool().filter(song => song.pack === pack.id).map(song => song.pk));
+  const missing = new Set(store.packMisses[pack.id] || []);
+  const open = pack.songs.filter(([a, t]) => !loaded.has(packKey(a, t)) && !missing.has(packKey(a, t)));
+  return { loaded: loaded.size, missing: missing.size, open };
+}
+
+function packCard(pack) {
+  const st = packStatus(pack);
+  const running = packLoad?.id === pack.id;
+  const total = pack.songs.length;
+  let action;
+  if (running) {
+    const pct = Math.round((packLoad.done / packLoad.total) * 100);
+    action = `
+      <div class="progress" role="progressbar" aria-valuenow="${pct}" aria-valuemin="0" aria-valuemax="100"><div style="width:${pct}%"></div></div>
+      <div class="row"><span class="muted small grow" data-pack-msg>${packProgressText()}</span>
+      <button class="btn btn-ghost" data-pack-stop>Anhalten</button></div>`;
+  } else if (st.open.length) {
+    action = `<button class="btn btn-primary btn-block" data-pack-load="${pack.id}">${st.loaded ? `Weiterladen (${st.open.length} offen)` : `Paket laden (${total} Songs)`}</button>`;
+  } else {
+    action = `<div class="row"><span class="badge grow" style="text-align:center">✓ Vollständig geladen</span>
+      ${st.missing ? `<button class="btn btn-ghost" data-pack-retry="${pack.id}">Fehlende erneut suchen</button>` : ''}</div>`;
+  }
+  return `
+    <div class="card stack" data-pack="${pack.id}">
+      <div class="row"><span style="font-size:1.8rem" aria-hidden="true">${pack.icon}</span>
+        <div class="grow"><strong>${esc(pack.name)}</strong><div class="muted small">${esc(pack.desc)}</div></div></div>
+      <p class="muted small" data-pack-info>${packInfoText(pack)}</p>
+      ${action}
+    </div>`;
+}
+
+function packInfoText(pack) {
+  const st = packStatus(pack);
+  return `${st.loaded} von ${pack.songs.length} geladen${st.missing ? ` · ${st.missing} bei iTunes nicht gefunden` : ''} · Erscheinungsjahr aus der Hitliste`;
+}
+
+function packProgressText() {
+  return packLoad.wait ? 'Kurze Pause (iTunes bremst) …' : `Lade ${packLoad.done} von ${packLoad.total} …`;
+}
+
+// Während des Ladens nur Balken und Texte anpassen, damit „Anhalten“ antippbar bleibt.
+function updatePackProgress(pack) {
+  const el = view.querySelector(`[data-pack="${pack.id}"]`);
+  if (!el || !packLoad) return;
+  const pct = Math.round((packLoad.done / packLoad.total) * 100);
+  const bar = el.querySelector('.progress');
+  if (bar) {
+    bar.setAttribute('aria-valuenow', pct);
+    bar.firstElementChild.style.width = pct + '%';
+  }
+  const msg = el.querySelector('[data-pack-msg]');
+  if (msg) msg.textContent = packProgressText();
+  el.querySelector('[data-pack-info]').textContent = packInfoText(pack);
+}
+
+function refreshPackCard(pack) {
+  const el = view.querySelector(`[data-pack="${pack.id}"]`);
+  if (!el) return;
+  el.outerHTML = packCard(pack);
+  wirePacks();
+}
+
+function wirePacks() {
+  view.querySelectorAll('[data-pack-load]').forEach(b => (b.onclick = () => loadPack(PACKS.find(p => p.id === b.dataset.packLoad))));
+  view.querySelectorAll('[data-pack-retry]').forEach(b => (b.onclick = () => {
+    const pack = PACKS.find(p => p.id === b.dataset.packRetry);
+    setPackMisses(pack.id, []);
+    loadPack(pack);
+  }));
+  view.querySelectorAll('[data-pack-stop]').forEach(b => (b.onclick = () => packLoad && (packLoad.stop = true)));
+}
+
+const sleep = ms => new Promise(r => setTimeout(r, ms));
+
+// Lädt die offenen Titel eines Pakets nacheinander (iTunes erlaubt nur ~20 Anfragen/Minute).
+// Gefundene Songs landen sofort im Pool, Abbrechen und Weiterladen ist jederzeit möglich.
+async function loadPack(pack) {
+  if (packLoad) return;
+  const todo = packStatus(pack).open;
+  packLoad = { id: pack.id, done: 0, total: todo.length, found: 0, stop: false, wait: false };
+  refreshPackCard(pack);
+  const misses = new Set(store.packMisses[pack.id] || []);
+  const backoff = window.__mqPackBackoff ?? 20000;
+  let failures = 0;
+  for (let i = 0; i < todo.length && !packLoad.stop; ) {
+    const entry = todo[i];
+    try {
+      const song = await lookupPackSong(entry, { country: store.settings.country });
+      if (song) {
+        addSource(pack.name, 'pack', [{ ...song, pack: pack.id }], { packId: pack.id });
+        packLoad.found++;
+      } else {
+        misses.add(packKey(entry[0], entry[1]));
+        setPackMisses(pack.id, [...misses]);
+      }
+      failures = 0;
+      i++;
+      packLoad.done = i;
+    } catch (err) {
+      // Meist Drosselung durch iTunes: kurz warten und denselben Titel erneut versuchen.
+      if (++failures > 4) {
+        toast(`Laden unterbrochen: ${err.message}`);
+        break;
+      }
+      packLoad.wait = true;
+      updatePackProgress(pack);
+      await sleep(backoff * failures);
+      packLoad.wait = false;
+    }
+    if (currentTab === 'songs' && !quiz) updatePackProgress(pack);
+    await sleep(window.__mqPackDelay ?? 400);
+  }
+  const { found } = packLoad;
+  packLoad = null;
+  toast(`${pack.name}: ${found} Songs hinzugefügt.`);
+  if (currentTab === 'songs' && !quiz) renderSongs();
+}
+
 function togglePreview(btn) {
   const song = store.songs[btn.dataset.preview];
   if (!song) return;
@@ -461,20 +616,25 @@ function togglePreview(btn) {
   playAudio().then(() => (btn.textContent = '❚❚')).catch(() => {});
 }
 
-async function doSearch(term, attr, limit) {
+async function doSearch(term, attr, limit, decade = '') {
   if (!term) return;
   const btn = view.querySelector('#search-btn');
   btn.disabled = true;
   btn.innerHTML = `<span class="spinner"></span> Suche „${esc(term)}“ …`;
   store.settings.limit = limit;
+  store.settings.searchDecade = decade;
+  save();
   try {
     const { country, originalsOnly } = store.settings;
-    const songs = await searchSongs(term, { attr, limit, country, originalsOnly });
+    // Mit Jahrzehnt-Filter so viele Treffer wie möglich holen, danach filtern.
+    const found = await searchSongs(term, { attr, limit: decade ? 200 : limit, country, originalsOnly });
+    const songs = found.filter(song => inDecade(song, decade)).slice(0, limit);
+    const where = decade ? ` aus den ${decadeLabel(decade)}n` : '';
     if (!songs.length) {
-      toast(`Keine Songs mit Hörprobe für „${term}“ gefunden.`);
+      toast(`Keine Songs${where} mit Hörprobe für „${term}“ gefunden.`);
     } else {
-      const added = addSource(term, attr, songs);
-      toast(`${added} neue Songs hinzugefügt (${songs.length} gefunden).`);
+      const added = addSource(decade ? `${term} · ${decadeLabel(decade)}` : term, attr, songs);
+      toast(`${added} neue Songs${where} hinzugefügt (${songs.length} gefunden).`);
     }
   } catch (err) {
     toast(err.message);

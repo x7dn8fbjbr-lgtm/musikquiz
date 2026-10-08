@@ -103,7 +103,8 @@ const KNOWLEDGE_KINDS = {
     return { prompt: `Wer singt bzw. spielt „${song.t}“?`, options: mcOptions(song.a, wrong) };
   },
   album(song, pool) {
-    if (!song.al || normalize(song.al).includes(normalize(song.t))) return null;
+    // Paket-Songs stammen oft von Compilations – das Album wäre dann irreführend.
+    if (song.pack || !song.al || normalize(song.al).includes(normalize(song.t))) return null;
     const isAlbum = a => a && !normalize(a).includes('greatest hits');
     const sameArtist = pool.filter(s => s.a === song.a).map(s => s.al).filter(isAlbum);
     let wrong = distinct(sameArtist, 3, normalize, [song.al]);

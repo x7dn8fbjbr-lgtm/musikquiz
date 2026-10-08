@@ -1,5 +1,6 @@
-import { store, save, pool, addSource, removeSource, removeSong, recordAnswer, recordRound, resetStats, exportData, importData } from './storage.js';
+import { store, save, pool, addSource, removeSource, setPackMisses, removeSong, recordAnswer, recordRound, resetStats, exportData, importData } from './storage.js';
 import { searchSongs, diagnose, proxiedPreview } from './api.js';
+import { PACKS, packKey, lookupPackSong } from './packs.js';
 import { MODES, DECADES, decadeLabel, inDecade, buildRound, evaluate, weakItems } from './questions.js';
 
 const view = document.getElementById('view');
@@ -416,11 +417,14 @@ const SUGGESTIONS = [
 
 function renderSongs() {
   const songs = pool().sort((a, b) => a.a.localeCompare(b.a) || a.t.localeCompare(b.t));
-  const attrLabel = { artist: 'Interpret', song: 'Songtitel', all: 'Alles' };
+  const attrLabel = { artist: 'Interpret', song: 'Songtitel', all: 'Alles', pack: 'Themenpaket' };
   view.innerHTML = `
     <h1>Songs</h1>
+    <h2>Themenpakete</h2>
+    <div class="stack" id="packs">${PACKS.map(packCard).join('')}</div>
+    <h2>Eigene Suche</h2>
     <p class="muted small">Such nach Interpreten, Genres oder Stichworten. Die Treffer (mit 30-Sekunden-Hörprobe) landen in deinem Song-Pool.</p>
-    <form class="card stack" id="search-form" style="margin-top:12px">
+    <form class="card stack" id="search-form">
       <label class="field"><span>Suchbegriff</span><input type="search" name="term" placeholder="z. B. Queen, Schlager, 80s Hits …" required enterkeyhint="search"></label>
       <div class="row">
         <label class="field grow"><span>Suchen in</span>
@@ -463,6 +467,7 @@ function renderSongs() {
     doSearch(form.term.value.trim(), form.attr.value, +form.limit.value, form.decade.value);
   };
   view.querySelectorAll('[data-term]').forEach(b => (b.onclick = () => doSearch(b.dataset.term, b.dataset.attr, +form.limit.value, form.decade.value)));
+  wirePacks();
   view.querySelectorAll('[data-del-src]').forEach(b => (b.onclick = () => {
     removeSource(b.dataset.delSrc);
     renderSongs();
@@ -476,6 +481,129 @@ function renderSongs() {
     const q = e.target.value.toLowerCase();
     view.querySelectorAll('#song-list li').forEach(li => (li.hidden = !li.dataset.q.includes(q)));
   });
+}
+
+// ---------- Themenpakete ----------
+let packLoad = null; // { id, done, total, found, stop }
+
+function packStatus(pack) {
+  const loaded = new Set(pool().filter(song => song.pack === pack.id).map(song => song.pk));
+  const missing = new Set(store.packMisses[pack.id] || []);
+  const open = pack.songs.filter(([a, t]) => !loaded.has(packKey(a, t)) && !missing.has(packKey(a, t)));
+  return { loaded: loaded.size, missing: missing.size, open };
+}
+
+function packCard(pack) {
+  const st = packStatus(pack);
+  const running = packLoad?.id === pack.id;
+  const total = pack.songs.length;
+  let action;
+  if (running) {
+    const pct = Math.round((packLoad.done / packLoad.total) * 100);
+    action = `
+      <div class="progress" role="progressbar" aria-valuenow="${pct}" aria-valuemin="0" aria-valuemax="100"><div style="width:${pct}%"></div></div>
+      <div class="row"><span class="muted small grow" data-pack-msg>${packProgressText()}</span>
+      <button class="btn btn-ghost" data-pack-stop>Anhalten</button></div>`;
+  } else if (st.open.length) {
+    action = `<button class="btn btn-primary btn-block" data-pack-load="${pack.id}">${st.loaded ? `Weiterladen (${st.open.length} offen)` : `Paket laden (${total} Songs)`}</button>`;
+  } else {
+    action = `<div class="row"><span class="badge grow" style="text-align:center">✓ Vollständig geladen</span>
+      ${st.missing ? `<button class="btn btn-ghost" data-pack-retry="${pack.id}">Fehlende erneut suchen</button>` : ''}</div>`;
+  }
+  return `
+    <div class="card stack" data-pack="${pack.id}">
+      <div class="row"><span style="font-size:1.8rem" aria-hidden="true">${pack.icon}</span>
+        <div class="grow"><strong>${esc(pack.name)}</strong><div class="muted small">${esc(pack.desc)}</div></div></div>
+      <p class="muted small" data-pack-info>${packInfoText(pack)}</p>
+      ${action}
+    </div>`;
+}
+
+function packInfoText(pack) {
+  const st = packStatus(pack);
+  return `${st.loaded} von ${pack.songs.length} geladen${st.missing ? ` · ${st.missing} bei iTunes nicht gefunden` : ''} · Erscheinungsjahr aus der Hitliste`;
+}
+
+function packProgressText() {
+  return packLoad.wait ? 'Kurze Pause (iTunes bremst) …' : `Lade ${packLoad.done} von ${packLoad.total} …`;
+}
+
+// Während des Ladens nur Balken und Texte anpassen, damit „Anhalten“ antippbar bleibt.
+function updatePackProgress(pack) {
+  const el = view.querySelector(`[data-pack="${pack.id}"]`);
+  if (!el || !packLoad) return;
+  const pct = Math.round((packLoad.done / packLoad.total) * 100);
+  const bar = el.querySelector('.progress');
+  if (bar) {
+    bar.setAttribute('aria-valuenow', pct);
+    bar.firstElementChild.style.width = pct + '%';
+  }
+  const msg = el.querySelector('[data-pack-msg]');
+  if (msg) msg.textContent = packProgressText();
+  el.querySelector('[data-pack-info]').textContent = packInfoText(pack);
+}
+
+function refreshPackCard(pack) {
+  const el = view.querySelector(`[data-pack="${pack.id}"]`);
+  if (!el) return;
+  el.outerHTML = packCard(pack);
+  wirePacks();
+}
+
+function wirePacks() {
+  view.querySelectorAll('[data-pack-load]').forEach(b => (b.onclick = () => loadPack(PACKS.find(p => p.id === b.dataset.packLoad))));
+  view.querySelectorAll('[data-pack-retry]').forEach(b => (b.onclick = () => {
+    const pack = PACKS.find(p => p.id === b.dataset.packRetry);
+    setPackMisses(pack.id, []);
+    loadPack(pack);
+  }));
+  view.querySelectorAll('[data-pack-stop]').forEach(b => (b.onclick = () => packLoad && (packLoad.stop = true)));
+}
+
+const sleep = ms => new Promise(r => setTimeout(r, ms));
+
+// Lädt die offenen Titel eines Pakets nacheinander (iTunes erlaubt nur ~20 Anfragen/Minute).
+// Gefundene Songs landen sofort im Pool, Abbrechen und Weiterladen ist jederzeit möglich.
+async function loadPack(pack) {
+  if (packLoad) return;
+  const todo = packStatus(pack).open;
+  packLoad = { id: pack.id, done: 0, total: todo.length, found: 0, stop: false, wait: false };
+  refreshPackCard(pack);
+  const misses = new Set(store.packMisses[pack.id] || []);
+  const backoff = window.__mqPackBackoff ?? 20000;
+  let failures = 0;
+  for (let i = 0; i < todo.length && !packLoad.stop; ) {
+    const entry = todo[i];
+    try {
+      const song = await lookupPackSong(entry, { country: store.settings.country });
+      if (song) {
+        addSource(pack.name, 'pack', [{ ...song, pack: pack.id }], { packId: pack.id });
+        packLoad.found++;
+      } else {
+        misses.add(packKey(entry[0], entry[1]));
+        setPackMisses(pack.id, [...misses]);
+      }
+      failures = 0;
+      i++;
+      packLoad.done = i;
+    } catch (err) {
+      // Meist Drosselung durch iTunes: kurz warten und denselben Titel erneut versuchen.
+      if (++failures > 4) {
+        toast(`Laden unterbrochen: ${err.message}`);
+        break;
+      }
+      packLoad.wait = true;
+      updatePackProgress(pack);
+      await sleep(backoff * failures);
+      packLoad.wait = false;
+    }
+    if (currentTab === 'songs' && !quiz) updatePackProgress(pack);
+    await sleep(window.__mqPackDelay ?? 400);
+  }
+  const { found } = packLoad;
+  packLoad = null;
+  toast(`${pack.name}: ${found} Songs hinzugefügt.`);
+  if (currentTab === 'songs' && !quiz) renderSongs();
 }
 
 function togglePreview(btn) {
